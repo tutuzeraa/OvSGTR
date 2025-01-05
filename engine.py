@@ -7,6 +7,7 @@ import math
 import os
 import sys
 from typing import Iterable
+import json
 
 from util.utils import slprint, to_device
 
@@ -16,7 +17,6 @@ import util.misc as utils
 from datasets.coco_eval import CocoEvaluator
 from datasets.sgg_eval import SggEvaluator 
 from datasets.panoptic_eval import PanopticEvaluator
-
 
 
 
@@ -262,6 +262,14 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
     _cnt = 0
     output_state_dict = {} # for debug only
 
+    # For getting stats about relations 
+    relations_info = dict()
+    relations_info['number_rel'] = 0
+    relations_info['all_rel'] = []
+    relations_info['min_rel'] = float('inf') 
+    relations_info['max_rel'] = float('-inf')
+    relations_info['mean_rel'] = 0
+
     for samples, targets in metric_logger.log_every(data_loader, 10, header, logger=logger):
         samples = samples.to(device)
         targets = [{k: to_device(v, device) for k, v in t.items()} for t in targets]
@@ -328,13 +336,18 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
                 res_pano[i]["file_name"] = file_name
 
             panoptic_evaluator.update(res_pano)
-        
+
+        # For mapping the classes and predicates 
+        idx2classes = {v: k for k, v in postprocessors['bbox'].name2classes.items()}
+        idx2predicates = {v: k for k, v in postprocessors['bbox'].name2predicates.items()}
+
+        save_graphs = True
+
         if args.save_results:
             # res_score = outputs['res_score']
             # res_label = outputs['res_label']
             # res_bbox = outputs['res_bbox']
             # res_idx = outputs['res_idx']
-
 
             for i, (tgt, res, outbbox) in enumerate(zip(targets, results, outputs['pred_boxes'])):
                 """
@@ -347,19 +360,19 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
                 tgt: dict.
 
                 """
+
                 # compare gt and res (after postprocess)
                 gt_bbox = tgt['boxes']
                 gt_label = tgt['labels']
                 gt_info = torch.cat((gt_bbox, gt_label.unsqueeze(-1)), 1)
                 
-                # img_h, img_w = tgt['orig_size'].unbind()
-                # scale_fct = torch.stack([img_w, img_h, img_w, img_h], dim=0)
-                # _res_bbox = res['boxes'] / scale_fct
-                _res_bbox = outbbox
+                img_h, img_w = tgt['orig_size'].unbind()
+                scale_fct = torch.stack([img_w, img_h, img_w, img_h], dim=0)
+                _res_bbox = res['boxes'] / scale_fct
+                # _res_bbox = outbbox
                 _res_prob = res['scores']
                 _res_label = res['labels']
                 res_info = torch.cat((_res_bbox, _res_prob.unsqueeze(-1), _res_label.unsqueeze(-1)), 1)
-                # import ipdb;ipdb.set_trace()
 
                 if 'gt_info' not in output_state_dict:
                     output_state_dict['gt_info'] = []
@@ -368,6 +381,52 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
                 if 'res_info' not in output_state_dict:
                     output_state_dict['res_info'] = []
                 output_state_dict['res_info'].append(res_info.cpu())
+
+                ### ADDITIONAL INFO ABOUT RELATIONS
+                num_pairs = len(res['graph']['all_node_pairs'])        
+                relations_info['number_rel'] += num_pairs
+                relations_info['all_rel'].append(num_pairs) 
+                if num_pairs < relations_info['min_rel']: relations_info['min_rel'] = num_pairs 
+                if num_pairs > relations_info['max_rel']: relations_info['max_rel'] = num_pairs 
+
+                # import pdb; pdb.set_trace()
+
+                ### SAVING THE TRIPLETS
+                # import pdb; pdb.set_trace()
+                if save_graphs:
+                    image_id = tgt['image_id'].item() if torch.is_tensor(tgt['image_id']) else tgt['image_id']
+                    
+                    object_labels = res['labels']  # shape [K]
+
+                    pairs = res['graph']['all_node_pairs']         # shape [N, 2]
+                    all_rels = res['graph']['all_relation']        # shape [N, R]
+                    max_scores, max_indices = all_rels.max(dim=1)  # max per row; max_scores: [N], max_indices: [N]
+
+                    triplets = []
+                    threshold = 0.35
+                    for (sub_idx, obj_idx), rel_score, rel_idx in zip(pairs, max_scores, max_indices):
+                        if rel_score.item() > threshold:
+                            subject_cls_id = object_labels[sub_idx].item()
+                            object_cls_id = object_labels[obj_idx].item()
+
+                            subject_label = idx2classes[subject_cls_id]
+                            object_label = idx2classes[object_cls_id]
+                            rel_label = idx2predicates[rel_idx.item()]
+
+                            triplet = {
+                                "source": f"{subject_label}.{sub_idx.item()}",
+                                "target": f"{object_label}.{obj_idx.item()}",
+                                "relation": rel_label,
+                                # "relation_score": float(rel_score.item())  # optional, to store score
+                            }
+                            triplets.append(triplet)
+                    
+                    json_dir = os.path.join(args.output_dir, "graphs")
+                    os.makedirs(json_dir, exist_ok=True)
+                    json_path = os.path.join(json_dir, f"{image_id}.json")
+
+                    with open(json_path, "w") as f:
+                        json.dump(triplets, f, indent=2)
 
             # # for debug only
             # import random
@@ -379,6 +438,14 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
             if _cnt % 15 == 0:
                 print("BREAK!"*5)
                 break
+
+    relations_info['mean_rel'] = sum(relations_info['all_rel']) / len(relations_info['all_rel'])
+    print("The mean number of relations is ", relations_info['mean_rel'])
+
+    infos_path = os.path.join(args.output_dir, "1-info_about_relations.txt")
+
+    with open(infos_path, "w") as f:
+        json.dump(relations_info, f, indent=2) 
 
     if args.save_results:
         import os.path as osp
@@ -513,5 +580,3 @@ def test(model, criterion, postprocessors, data_loader, base_ds, device, output_
             json.dump(final_res, f)        
 
     return final_res
-
-
