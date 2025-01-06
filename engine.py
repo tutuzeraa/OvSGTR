@@ -8,6 +8,8 @@ import os
 import sys
 from typing import Iterable
 import json
+import matplotlib.pyplot as plt
+import cv2
 
 from util.utils import slprint, to_device
 
@@ -18,7 +20,7 @@ from datasets.coco_eval import CocoEvaluator
 from datasets.sgg_eval import SggEvaluator 
 from datasets.panoptic_eval import PanopticEvaluator
 
-
+from util.vis_utils import plot_raw_img2, add_box_to_img
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
@@ -270,6 +272,9 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
     relations_info['max_rel'] = float('-inf')
     relations_info['mean_rel'] = 0
 
+    vis_dir = os.path.join(args.output_dir, "visualization")
+    os.makedirs(vis_dir, exist_ok=True)
+
     for samples, targets in metric_logger.log_every(data_loader, 10, header, logger=logger):
         samples = samples.to(device)
         targets = [{k: to_device(v, device) for k, v in t.items()} for t in targets]
@@ -360,6 +365,10 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
                 tgt: dict.
 
                 """
+                # import pdb; pdb.set_trace()
+                image_id = tgt['image_id'].item() if torch.is_tensor(tgt['image_id']) else tgt['image_id']
+                img_dir = os.path.join(vis_dir, f"{image_id}")
+                os.makedirs(img_dir, exist_ok=True)
 
                 # compare gt and res (after postprocess)
                 gt_bbox = tgt['boxes']
@@ -388,26 +397,43 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
                 relations_info['all_rel'].append(num_pairs) 
                 if num_pairs < relations_info['min_rel']: relations_info['min_rel'] = num_pairs 
                 if num_pairs > relations_info['max_rel']: relations_info['max_rel'] = num_pairs 
+                relations_info['mean_rel'] = sum(relations_info['all_rel']) / len(relations_info['all_rel'])
+                print("----INFO ABOUT RELATIONS ----\n", relations_info)
 
-                # import pdb; pdb.set_trace()
+                ### GETTING IMAGE WITH BOUNDING BOXES
+                import pdb; pdb.set_trace()
+                imgg = samples.tensors
+                gt_img = plot_raw_img2(imgg[0], gt_bbox, gt_label, idx2classes)
+                pred_img = plot_raw_img2(imgg[0], _res_bbox, _res_label, idx2classes)
+
+                save_gt = os.path.join(img_dir, f"gt_bbox.png")
+                save_pred = os.path.join(img_dir, f"pred_bbox.png")
+                cv2.imwrite(save_gt, gt_img) 
+                cv2.imwrite(save_pred, pred_img) 
 
                 ### SAVING THE TRIPLETS
-                # import pdb; pdb.set_trace()
                 if save_graphs:
-                    image_id = tgt['image_id'].item() if torch.is_tensor(tgt['image_id']) else tgt['image_id']
                     
                     object_labels = res['labels']  # shape [K]
 
                     pairs = res['graph']['all_node_pairs']         # shape [N, 2]
                     all_rels = res['graph']['all_relation']        # shape [N, R]
+                    all_bbox = res['graph']['pred_boxes']
                     max_scores, max_indices = all_rels.max(dim=1)  # max per row; max_scores: [N], max_indices: [N]
+                    
+                    def find(relations, bboxes, obj_id):
+                        for i, rel in enumerate(relations):
+                            if rel == obj_id: 
+                                return bboxes[i]
 
                     triplets = []
                     threshold = 0.35
                     for (sub_idx, obj_idx), rel_score, rel_idx in zip(pairs, max_scores, max_indices):
                         if rel_score.item() > threshold:
                             subject_cls_id = object_labels[sub_idx].item()
+                            subject_bbox = find(_res_label, all_bbox, subject_cls_id) 
                             object_cls_id = object_labels[obj_idx].item()
+                            object_bbox = find(_res_label, all_bbox, object_cls_id) 
 
                             subject_label = idx2classes[subject_cls_id]
                             object_label = idx2classes[object_cls_id]
@@ -420,10 +446,17 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
                                 # "relation_score": float(rel_score.item())  # optional, to store score
                             }
                             triplets.append(triplet)
-                    
-                    json_dir = os.path.join(args.output_dir, "graphs")
-                    os.makedirs(json_dir, exist_ok=True)
-                    json_path = os.path.join(json_dir, f"{image_id}.json")
+                            
+                            import pdb; pdb.set_trace()
+                            _boxes = [subject_bbox, object_bbox]
+                            _labs = [subject_cls_id, object_cls_id]
+                            colorlist = [(0, 0, 255),(0, 255, 0)] 
+                            triplet_img = add_box_to_img(imgg[0].permute(1, 2, 0).cpu().numpy(), _boxes, _labs, [subject_label, object_label])
+                            save_triplet = os.path.join(img_dir, f"{subject_label}_{rel_label}.png")
+                            cv2.imwrite(save_triplet, triplet_img) 
+
+                    # writing the jsons
+                    json_path = os.path.join(img_dir, f"{image_id}_triplets.json")
 
                     with open(json_path, "w") as f:
                         json.dump(triplets, f, indent=2)

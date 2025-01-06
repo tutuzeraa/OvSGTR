@@ -90,3 +90,59 @@ def plot_raw_img(img, boxes, labels):
             fontScale, _color_getter(label), thickness, cv2.LINE_AA)
 
     return img
+
+def plot_raw_img2(img, boxes, labels, convert_dict):
+    """[summary]
+
+    Args:
+        img ([type]): 3,H,W. tensor. 
+        boxes ([type]): Kx4. tensor
+        labels ([type]): K. tensor.
+
+    return:
+        img: np.array. H,W,3. img with bbox annos.
+    
+    """
+    img = (renorm(img.cpu()).permute(1,2,0).numpy() * 255).astype(np.uint8)
+    H, W = img.shape[:2]
+    for box, label in zip(boxes.tolist(), labels.tolist()):
+        x, y, w, h = box[0] * W, box[1] * H, box[2] * W, box[3] * H
+
+        img = cv2.rectangle(img.copy(), (int(x-w/2), int(y-h/2)), (int(x+w/2), int(y+h/2)), _color_getter(label), 2)
+        # add text
+        org = (int(x-w/2), int(y+h/2))
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        fontScale = 1
+        thickness = 2
+        img = cv2.putText(img.copy(), str(convert_dict[label]), org, font, 
+            fontScale, _color_getter(label), thickness, cv2.LINE_AA)
+
+    return img
+
+def plot_raw_img3(img, boxes, labels, convert_dict):
+    """[summary]
+
+    Args:
+        img ([type]): 3,H,W. tensor. 
+        boxes ([type]): Kx4. tensor
+        labels ([type]): K. tensor.
+
+    return:
+        img: np.array. H,W,3. img with bbox annos.
+    
+    """
+    img = (renorm(img.cpu()).permute(1,2,0).numpy() * 255).astype(np.uint8)
+    H, W = img.shape[:2]
+    for box, label in zip(boxes, labels):
+        x, y, w, h = box[0] * W, box[1] * H, box[2] * W, box[3] * H
+
+        img = cv2.rectangle(img.copy(), (int(x-w/2), int(y-h/2)), (int(x+w/2), int(y+h/2)), _color_getter(label), 2)
+        # add text
+        org = (int(x-w/2), int(y+h/2))
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        fontScale = 1
+        thickness = 2
+        img = cv2.putText(img.copy(), str(convert_dict[label]), org, font, 
+            fontScale, _color_getter(label), thickness, cv2.LINE_AA)
+
+    return img
