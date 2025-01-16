@@ -11,7 +11,7 @@ import json
 import matplotlib.pyplot as plt
 import cv2
 
-from util.utils import slprint, to_device
+from util.utils import slprint, to_device, convert_boxes_to_normalized
 
 import torch
 
@@ -369,6 +369,8 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
                 image_id = tgt['image_id'].item() if torch.is_tensor(tgt['image_id']) else tgt['image_id']
                 img_dir = os.path.join(vis_dir, f"{image_id}")
                 os.makedirs(img_dir, exist_ok=True)
+                triplets_dir = os.path.join(img_dir, "triplets")
+                os.makedirs(triplets_dir, exist_ok=True)
 
                 # compare gt and res (after postprocess)
                 gt_bbox = tgt['boxes']
@@ -401,7 +403,7 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
                 print("----INFO ABOUT RELATIONS ----\n", relations_info)
 
                 ### GETTING IMAGE WITH BOUNDING BOXES
-                import pdb; pdb.set_trace()
+                # import pdb; pdb.set_trace()
                 imgg = samples.tensors
                 gt_img = plot_raw_img2(imgg[0], gt_bbox, gt_label, idx2classes)
                 pred_img = plot_raw_img2(imgg[0], _res_bbox, _res_label, idx2classes)
@@ -420,40 +422,54 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
                     all_rels = res['graph']['all_relation']        # shape [N, R]
                     all_bbox = res['graph']['pred_boxes']
                     max_scores, max_indices = all_rels.max(dim=1)  # max per row; max_scores: [N], max_indices: [N]
-                    
-                    def find(relations, bboxes, obj_id):
-                        for i, rel in enumerate(relations):
-                            if rel == obj_id: 
-                                return bboxes[i]
 
+                    # import pdb; pdb.set_trace()
                     triplets = []
-                    threshold = 0.35
+                    threshold = 0.50
                     for (sub_idx, obj_idx), rel_score, rel_idx in zip(pairs, max_scores, max_indices):
                         if rel_score.item() > threshold:
-                            subject_cls_id = object_labels[sub_idx].item()
-                            subject_bbox = find(_res_label, all_bbox, subject_cls_id) 
-                            object_cls_id = object_labels[obj_idx].item()
-                            object_bbox = find(_res_label, all_bbox, object_cls_id) 
+                            # Extract subject and object bounding boxes
+                            subject_bbox = all_bbox[sub_idx].tolist() 
+                            object_bbox = all_bbox[obj_idx].tolist()  
 
+                            # Validate bounding boxe
+                            # print(f"Subject BBox: {subject_bbox}, Object BBox: {object_bbox}")
+
+                            # Extract labels
+                            subject_cls_id = object_labels[sub_idx].item()
+                            object_cls_id = object_labels[obj_idx].item()
                             subject_label = idx2classes[subject_cls_id]
                             object_label = idx2classes[object_cls_id]
                             rel_label = idx2predicates[rel_idx.item()]
 
+                            # Append triplet
                             triplet = {
                                 "source": f"{subject_label}.{sub_idx.item()}",
                                 "target": f"{object_label}.{obj_idx.item()}",
                                 "relation": rel_label,
-                                # "relation_score": float(rel_score.item())  # optional, to store score
+                                "score": rel_score.item()
                             }
                             triplets.append(triplet)
-                            
-                            import pdb; pdb.set_trace()
-                            _boxes = [subject_bbox, object_bbox]
-                            _labs = [subject_cls_id, object_cls_id]
-                            colorlist = [(0, 0, 255),(0, 255, 0)] 
-                            triplet_img = add_box_to_img(imgg[0].permute(1, 2, 0).cpu().numpy(), _boxes, _labs, [subject_label, object_label])
-                            save_triplet = os.path.join(img_dir, f"{subject_label}_{rel_label}.png")
-                            cv2.imwrite(save_triplet, triplet_img) 
+
+                            # Generate triplet visualization
+                            print(f"Triplets for image {image_id}")
+                            triplet_boxes = torch.tensor([subject_bbox, object_bbox])
+                            triplet_boxes = convert_boxes_to_normalized(triplet_boxes, img_w, img_h)
+                            triplet_labels = torch.tensor([subject_cls_id, object_cls_id])
+
+                            triplet_img = plot_raw_img2(
+                                imgg[0],
+                                triplet_boxes,
+                                triplet_labels,
+                                idx2classes
+                            )
+
+                            # Save triplet visualization
+                            save_triplet_path = os.path.join(
+                                triplets_dir,
+                                f"{subject_label}_{rel_label}_{object_label}.png"
+                            )
+                            cv2.imwrite(save_triplet_path, triplet_img)
 
                     # writing the jsons
                     json_path = os.path.join(img_dir, f"{image_id}_triplets.json")

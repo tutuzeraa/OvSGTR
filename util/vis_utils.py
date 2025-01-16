@@ -4,7 +4,7 @@ import numpy as np
 from util.utils import renorm
 from util.misc import color_sys
 
-_color_getter = color_sys(100)
+_color_getter = color_sys(200)
 
 # plot known and unknown box
 def add_box_to_img(img, boxes, colorlist, brands=None):

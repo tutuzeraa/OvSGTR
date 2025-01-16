@@ -470,3 +470,40 @@ class BestMetricHolder():
     def __str__(self) -> str:
         return self.__repr__()
             
+def convert_boxes_to_normalized(bboxes, img_width, img_height):
+    """
+    Convert bounding boxes from [x_min, y_min, x_max, y_max] format
+    to [x_center, y_center, width, height] normalized to [0, 1].
+
+    Args:
+        bboxes (torch.Tensor): Tensor of shape (N, 4) with absolute pixel values.
+        img_width (float or torch.Tensor): Scalar for image width.
+        img_height (float or torch.Tensor): Scalar for image height.
+
+    Returns:
+        torch.Tensor: Normalized bounding boxes of shape (N, 4).
+    """
+    # Ensure inputs are on the same device
+    if isinstance(img_width, torch.Tensor):
+        img_width = img_width.item()  # Convert to Python scalar if tensor
+    if isinstance(img_height, torch.Tensor):
+        img_height = img_height.item()
+
+    x_min = bboxes[:, 0]
+    y_min = bboxes[:, 1]
+    x_max = bboxes[:, 2]
+    y_max = bboxes[:, 3]
+
+    # Calculate center, width, and height
+    x_center = (x_min + x_max) / 2.0
+    y_center = (y_min + y_max) / 2.0
+    width = x_max - x_min
+    height = y_max - y_min
+
+    # Normalize to [0, 1]
+    x_center /= img_width
+    y_center /= img_height
+    width /= img_width
+    height /= img_height
+
+    return torch.stack([x_center, y_center, width, height], dim=1) 
