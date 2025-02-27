@@ -5,6 +5,7 @@ import copy
 
 from .coco import build as build_coco
 from .vg import build_vg
+from .custom import CustomDataset
 
 from torch.utils.data import ConcatDataset
 
@@ -77,6 +78,9 @@ def build_dataset(image_set, args):
         sbu_data = build_sbucaptions(image_set, args)
 
         return ConcatDataset([coco_data, flickr_data, sbu_data])
+
+    if args.dataset_file == 'custom':
+        return CustomDataset(args, image_set)
 
 
     raise ValueError(f'dataset {args.dataset_file} not supported')

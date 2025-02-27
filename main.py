@@ -439,6 +439,29 @@ def main(gpu, ngpus_per_node, args):
         if args.output_dir and coco_evaluator is not None:
             utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
 
+        # Save predictions if --save_results is set
+        if args.save_results and args.output_dir and utils.is_main_process():
+            # Assuming evaluate or postprocessors store predictions
+            # Adjust based on actual evaluate function output
+            predictions = coco_evaluator.predictions if hasattr(coco_evaluator, 'predictions') else None
+            if predictions is None:
+                # Fallback: run inference manually if predictions aren't available
+                model.eval()
+                predictions = []
+                with torch.no_grad():
+                    for images, targets in data_loader_val:
+                        images = images.to(device)
+                        outputs = model(images)
+                        processed_outputs = postprocessors['bbox'](outputs, targets)
+                        predictions.extend(processed_outputs)
+            
+            # Save predictions as JSON
+            import json
+            output_file = os.path.join(args.output_dir, "predictions.json")
+            with open(output_file, 'w') as f:
+                json.dump(predictions, f, indent=2)
+            logger.info(f"Predictions saved to {output_file}")
+
         log_stats = {**{f'test_{k}': v for k, v in test_stats.items()} }
         if args.output_dir and utils.is_main_process():
             with (output_dir / "log.txt").open("a") as f:
