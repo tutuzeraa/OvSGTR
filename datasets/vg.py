@@ -528,8 +528,9 @@ def load_image_filenames(img_dir, image_file):
             fns.append(filename)
             img_info.append(img)
 
-    assert len(fns) == 108073
-    assert len(img_info) == 108073
+    # talvez isso seja importante
+    # assert len(fns) == 108073
+    # assert len(img_info) == 108073
     return fns, img_info
 
 
@@ -727,7 +728,15 @@ def build_vg(image_set, args, disable_transforms=False):
         strong_aug=strong_aug, args=args) if not disable_transforms else None
 
     use_text_labels = getattr(args, "use_text_labels", False)
-    roidb_key = getattr(args, "vg_roidb_key", "split")
+
+    if image_set != 'train':
+        roidb_file = os.path.join(data_path, "stanford_filtered", "custom_annotations.h5")
+        image_file = os.path.join(data_path, "stanford_filtered", "custom_image_data.json")
+        roidb_key = "split"  # the custom file uses key "split"
+    else:
+        roidb_file = os.path.join(data_path, "stanford_filtered", "VG-SGG.h5")
+        image_file = os.path.join(data_path, "stanford_filtered", "image_data.json")
+        roidb_key = getattr(args, "vg_roidb_key", "split")
 
     filter_non_overlap = getattr(args, "filter_non_overlap", True)
     sg_ovd_mode = getattr(args, "sg_ovd_mode", False)
@@ -735,9 +744,9 @@ def build_vg(image_set, args, disable_transforms=False):
 
     return VGDataset(split=image_set,
                      img_dir=os.path.join(data_path, "VG_100K"), 
-                     roidb_file=os.path.join(data_path, "stanford_filtered/VG-SGG.h5"), 
+                     roidb_file=roidb_file, 
                      dict_file=os.path.join(data_path, "stanford_filtered/VG-SGG-dicts.json"), 
-                     image_file=os.path.join(data_path, "stanford_filtered/image_data.json"),
+                     image_file=image_file,
                      transforms=transforms,
                      use_text_labels=use_text_labels,
                      roidb_key=roidb_key,

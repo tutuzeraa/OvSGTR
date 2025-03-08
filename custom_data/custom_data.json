@@ -1,0 +1,13 @@
+{
+   "image_id": 3000000,
+   "width": 620,
+   "height": 415,
+   "objects": [
+      {"bbox": [231, 82, 447, 414], "label": "woman"},
+      {"bbox": [314, 13, 576, 415], "label": "man"}
+   ],
+   "relationships": [
+      {"subject": 0, "object": 1, "predicate": "on"},
+      {"subject": 0, "object": 1, "predicate": "with"}
+   ]
+}
